@@ -938,6 +938,43 @@ write_image_to_disk() {
     udevadm settle
 }
 
+#########################################################
+#Download node data if specified as a boot arg
+#########################################################
+write_xdata_file() {
+   echo "Processing xdata"
+   export kernelcmdline=`cat /proc/cmdline`
+   if [[ $kernelcmdline == *"xdata="* ]];
+   then
+      mkdir -p "$boot_partition"
+      mount_boot_partition "$boot_partition"
+      trap 'umount $boot_partition; trap - RETURN' RETURN
+      export XDATAURL=`cat /proc/cmdline | sed -e 's/^.*xdata=//' -e 's/ .*$//'`
+      echo ${XDATAURL}
+      curl ${XDATAURL} -o "${boot_partition}/${XDATAURL##*/}"
+   else
+      echo "No XDATAURL provided"
+   fi
+}
+#########################################################
+#Save primary and secondary MAC addresses to disk
+#########################################################
+write_mac_addresses() {
+   echo "Processing MAC addresses"
+   export kernelcmdline=`cat /proc/cmdline`
+   if [[ $kernelcmdline == *"macAddressList="* ]];
+   then
+      mkdir -p "$boot_partition"
+      mount_boot_partition "$boot_partition"
+      trap 'umount $boot_partition; trap - RETURN' RETURN
+      export PRIMARY_MAC=`cat /proc/cmdline | sed -e 's/^.*macAddressList//' -e 's/ .*$//' | awk -F= '{print $2}' | awk -F, '{print $1}'`
+      export SECONDARY_MAC=`cat /proc/cmdline | sed -e 's/^.*macAddressList//' -e 's/ .*$//' | awk -F= '{print $2}' | awk -F, '{print $2}'`
+      echo -e "PRIMARY_MAC=${PRIMARY_MAC}\nSECONDARY_MAC=${SECONDARY_MAC}" > "${boot_partition}"/mac_addresses
+   else
+      echo "No MAC addresses provided"
+   fi
+}
+
 parse_args() {
     USAGE="Usage: $0 [options]
 Options:
@@ -989,22 +1026,38 @@ This tool installs CoreOS style disk images on a block device.
 }
 
 write_xdata_file() {
-# /dev/sda1 on /boot 
    echo "Processing xdata"
    export kernelcmdline=`cat /proc/cmdline`
    if [[ $kernelcmdline == *"xdata="* ]];
    then
+      mkdir -p "$boot_partition"
+      mount_boot_partition "$boot_partition"
+      trap 'umount $boot_partition; trap - RETURN' RETURN
       export XDATAURL=`cat /proc/cmdline | sed -e 's/^.*xdata=//' -e 's/ .*$//'`
       echo ${XDATAURL}
-      mkdir -p /var/mnt/boot
-      mount /dev/sda1 /var/mnt/boot
-      curl ${XDATAURL} -o /var/mnt/boot/"${XDATAURL##*/}"
-      umount /var/mnt/boot
+      curl ${XDATAURL} -o "${boot_partition}/${XDATAURL##*/}"
    else
       echo "No XDATAURL provided"
    fi
 }
 
+write_mac_addresses() {
+   echo "Processing MAC addresses"
+   export kernelcmdline=`cat /proc/cmdline`
+   if [[ $kernelcmdline == *"macAddressList="* ]];
+   then
+      mkdir -p "$boot_partition"
+      mount_boot_partition "$boot_partition"
+      trap 'umount $boot_partition; trap - RETURN' RETURN
+      export PRIMARY_MAC=`cat /proc/cmdline | sed -e 's/^.*macAddressList//' -e 's/ .*$//' | awk -F= '{print $2}' | awk -F, '{print $1}'`
+      export SECONDARY_MAC=`cat /proc/cmdline | sed -e 's/^.*macAddressList//' -e 's/ .*$//' | awk -F= '{print $2}' | awk -F, '{print $2}'`
+      echo -e "PRIMARY_MAC=${PRIMARY_MAC}\nSECONDARY_MAC=${SECONDARY_MAC}" > "${boot_partition}"/mac_addresses
+   else
+      echo "No MAC addresses provided"
+   fi
+
+  sleep 120
+}
 
 # Main function for running the installer
 main() {
@@ -1048,9 +1101,10 @@ main() {
     # If platform is s390x, update bootloader records
     write_zipl_bootloader
 
-    # Save any extra partitions
+    # Customer customizations
     write_extra_partitions
     write_xdata_file
+    write_mac_addresses
 
     log "Install complete"
 }
